@@ -1,0 +1,35 @@
+{
+    "device_config": {
+        "fmcw_single_shape": {
+            "aaf_cutoff_Hz": 500000,
+            "chirp_repetition_time_s": 0.0001500000071246177,
+            "end_frequency_Hz": 63500000000,
+            "frame_repetition_time_s": 0.004999999888241291,
+            "hp_cutoff_Hz": 80000,
+            "if_gain_dB": 23,
+            "mimo_mode": "off",
+            "num_chirps_per_frame": 1,
+            "num_samples_per_chirp": 256,
+            "rx_antennas": [
+                1,
+                2,
+                3
+            ],
+            "sample_rate_Hz": 2000000,
+            "start_frequency_Hz": 58000000000,
+            "tx_antennas": [
+                1
+            ],
+            "tx_power_level": 31
+        }
+    },
+    "device_info": {
+        "baseboard_name": "Radar Baseboard MCU7 (MCU B)",
+        "device_name": "BGT60TR13C",
+        "firmware_version": "2.6.0"
+    },
+    "json_version": {
+        "type": "BGT60TR13C_Standard",
+        "version": "4.0.0"
+    }
+}
