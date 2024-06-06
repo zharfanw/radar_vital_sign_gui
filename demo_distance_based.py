@@ -35,6 +35,8 @@ from ifxradarsdk.fmcw import DeviceFmcw
 from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwMetrics
 from helpers.DistanceAlgo import *
 
+windows_length = 10000
+windows = np.zeros(windows_length)
 
 # -------------------------------------------------
 # Presentation
@@ -157,8 +159,7 @@ f.close()
 pretty_json = json.dumps(data_sample_config, indent=2)
 print(pretty_json)
 
-windows_length = 10000
-windows = np.zeros(windows_length)
+
 
 # -------------------------------------------------
 # Main logic
