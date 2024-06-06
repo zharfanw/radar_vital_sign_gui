@@ -166,3 +166,4 @@ dataset/
 .virtual_documents
 
 .tmp.driveupload/
+.virtenv

@@ -167,15 +167,15 @@ if __name__ == '__main__':
                 heart_rate = peakheart(heart_fre, maxIndexBreathSpect)
 
                 if(first_time):
-                    _pln.append(_axs[0].plot(dfft_data))
+                    _pln.append(_axs[0].plot(frame))
                     _pln.append(_axs[1].plot(heart_wave))
                     # atasnya = _axs[0].plot(np.arange(256),np.arange(256))
                     # bawahnya = _axs[1].plot([3,4])
-                    first_time = False
+                    # first_time = False
                 else:
-                    _pln[0][0].set_ydata(dfft_data)
+                    _pln[0][0].set_ydata(frame)
                     _pln[1][0].set_ydata(heart_wave)
-                # atasnya[0].set_ydata(frame)
+                atasnya[0].set_ydata(frame)
                 # bawahnya.set_ydata(heart_wave)
                 _fig.canvas.draw_idle()
                 _fig.canvas.flush_events()
