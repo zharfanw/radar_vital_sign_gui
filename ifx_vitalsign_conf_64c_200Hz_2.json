@@ -9,7 +9,7 @@
             "if_gain_dB": 23,
             "mimo_mode": "off",
             "num_chirps_per_frame": 1,
-            "num_samples_per_chirp": 256,
+            "num_samples_per_chirp": 64,
             "rx_antennas": [
                 1,
                 2,

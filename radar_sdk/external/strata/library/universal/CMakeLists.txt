@@ -1,8 +1,0 @@
-
-file(GLOB_RECURSE UNIVERSAL_HEADERS *.h)
-
-set(UNIVERSAL_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/error_strings.c"
-    )
-
-add_library(universal OBJECT ${UNIVERSAL_HEADERS} ${UNIVERSAL_SOURCES})

@@ -35,7 +35,7 @@ from ifxradarsdk.fmcw import DeviceFmcw
 from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwMetrics
 from helpers.DistanceAlgo import *
 
-windows_length = 10000
+windows_length = 200
 windows = np.zeros(windows_length)
 
 # -------------------------------------------------
@@ -89,6 +89,86 @@ class Draw:
 
             ax.set_xlabel("distance (m)")
             ax.set_ylabel("FFT magnitude")
+            ax.set_title("Antenna #" + str(i_ant))
+        self._fig.tight_layout()
+
+    def _draw_next_time(self, data_all_antennas):
+        # data_all_antennas: array of raw data for each antenna
+
+        for i_ant in range(0, self._num_ant):
+            data = data_all_antennas[i_ant]
+            self._pln[i_ant].set_ydata(data)
+
+    def draw(self, data_all_antennas):
+        # Draw plots for all antennas
+        # data_all_antennas: array of raw data for each antenna
+        if self._is_window_open:
+            if len(self._pln) == 0:  # handle the first run
+                self._draw_first_time(data_all_antennas)
+            else:
+                self._draw_next_time(data_all_antennas)
+
+            self._fig.canvas.draw_idle()
+            self._fig.canvas.flush_events()
+
+    def close(self, event=None):
+        if self.is_open():
+            self._is_window_open = False
+            plt.close(self._fig)
+            plt.close('all')  # Needed for Matplotlib ver: 3.4.0 and 3.4.1
+            print('Application closed!')
+
+    def is_open(self):
+        return self._is_window_open
+
+# -------------------------------------------------
+# Presentation
+# -------------------------------------------------
+class VitalDraw:
+    # Draws plots for data - each antenna is in separated plot
+
+    def __init__(self,num_ant, num_samples):
+        # max_range_m:  maximum supported range
+        # num_ant:      number of available antennas
+
+        self._num_ant = num_ant
+        self._pln = []
+
+        plt.ion()
+
+        self._fig, self._axs = plt.subplots(nrows=1, ncols=num_ant, figsize=((num_ant + 1) // 2, 2))
+        self._fig.canvas.manager.set_window_title("Range FFT")
+        self._fig.set_size_inches(17 / 3 * num_ant, 4)
+
+        self._dist_points = np.arange(0,num_samples,1)
+
+        self._fig.canvas.mpl_connect('close_event', self.close)
+        self._is_window_open = True
+
+    def _draw_first_time(self, data_all_antennas):
+        # Create common plots as well scale it in same way
+        # data_all_antennas: array of raw data for each antenna
+        minmin = min([np.min(data) for data in data_all_antennas])
+        maxmax = max([np.max(data) for data in data_all_antennas])
+
+        for i_ant in range(self._num_ant):
+            # This is a workaround: If there is only one plot then self._axs is
+            # an object of the blass type AxesSubplot. However, if multiple
+            # axes is available (if more than one RX antenna is activated),
+            # then self._axs is an numpy.ndarray of AxesSubplot.
+            # The code above gets in both cases the axis.
+            if type(self._axs) == np.ndarray:
+                ax = self._axs[i_ant]
+            else:
+                ax = self._axs
+
+            data = data_all_antennas[i_ant]
+            pln, = ax.plot(self._dist_points, data)
+            ax.set_ylim(0, 0.01)
+            self._pln.append(pln)
+
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Selected magnitude")
             ax.set_title("Antenna #" + str(i_ant))
         self._fig.tight_layout()
 
@@ -228,8 +308,10 @@ if __name__ == '__main__':
 
         algo = DistanceAlgo(chirp, chirp_loop.loop.num_repetitions)
         draw = Draw(metrics.max_range_m, num_rx_antennas, chirp.num_samples)
+        vitaldraw = VitalDraw(num_rx_antennas, windows_length)
 
-        for frame_number in range(args.nframes):  # for each frame
+        # for frame_number in range(args.nframes):  # for each frame
+        while draw.is_open():
             if not draw.is_open():
                 break
             frame_contents = device.get_next_frame()
@@ -237,16 +319,28 @@ if __name__ == '__main__':
 
             distance_data_all_antennas = []
             distance_peak_m_4_all_ant = []
+            windows_all = []
 
             for i_ant in range(0, num_rx_antennas):  # for each antenna
                 antenna_samples = frame_data[i_ant, :, :]
                 distance_peak_m, distance_data = algo.compute_distance(antenna_samples)
 
+                # Step 4 - peak search and distance calculation
+                skip = 8
+                distance_peak = np.argmax(distance_data[skip:])
+                magnitude = distance_data[distance_peak + skip]
+
+                windows = windows[1:]
+                windows = np.append(windows,[magnitude])
+
                 distance_data_all_antennas.append(distance_data)
                 distance_peak_m_4_all_ant.append(distance_peak_m)
+                windows_all.append(windows)
 
                 print("Distance antenna # " + str(i_ant) + ": " +
-                      format(distance_peak_m, "^05.3f") + "m")
+                      format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
             draw.draw(distance_data_all_antennas)
+            vitaldraw.draw(windows_all)
 
         draw.close()
+        vitaldraw.close()
