@@ -256,7 +256,7 @@ if __name__ == '__main__':
 
         # use all available RX antennas
         # num_rx_antennas = device.get_sensor_information()["num_rx_antennas"]
-        num_rx_antennas = 1
+        num_rx_antennas = 3
 
         metrics = FmcwMetrics(
             range_resolution_m=0.05,
@@ -329,17 +329,17 @@ if __name__ == '__main__':
                 skip = 8
                 distance_peak = np.argmax(distance_data[skip:])
                 magnitude = distance_data[distance_peak + skip]
-
                 windows = windows[1:]
                 windows = np.append(windows,[magnitude])
-
-                distance_data_all_antennas.append(distance_data)
-                distance_peak_m_4_all_ant.append(distance_peak_m)
                 windows_all.append(windows)
 
+
+                # distance_data_all_antennas.append(distance_data)
+                # distance_peak_m_4_all_ant.append(distance_peak_m)
+                
                 print("Distance antenna # " + str(i_ant) + ": " +
                       format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
-            draw.draw(distance_data_all_antennas)
+            # draw.draw(distance_data_all_antennas)
             vitaldraw.draw(windows_all)
 
         draw.close()
