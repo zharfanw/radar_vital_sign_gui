@@ -35,8 +35,8 @@ from ifxradarsdk.fmcw import DeviceFmcw
 from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwMetrics
 from helpers.DistanceAlgo import *
 
-windows_length = 200
-windows = np.zeros(windows_length)
+import threading
+import time
 
 # -------------------------------------------------
 # Presentation
@@ -164,7 +164,7 @@ class VitalDraw:
 
             data = data_all_antennas[i_ant]
             pln, = ax.plot(self._dist_points, data)
-            ax.set_ylim(0, 0.01)
+            ax.set_ylim(0, 0.04)
             self._pln.append(pln)
 
             ax.set_xlabel("Time")
@@ -200,6 +200,29 @@ class VitalDraw:
 
     def is_open(self):
         return self._is_window_open
+
+class Filter_moving_avg:
+    def __init__(self,windows_length):
+        self.windows_length = windows_length
+        self._filt_window = []
+        self._current_sum = 0
+    
+    def filter_dat(self,input_dat):
+        if(len(self._filt_window)<self.windows_length):
+            self._current_sum = self._current_sum + input_dat
+            self._filt_window.append(input_dat)
+            
+        else:            
+            self._current_sum = self._current_sum - self._filt_window[0]
+            self._filt_window.pop(0)
+
+            self._current_sum = self._current_sum + input_dat
+            self._filt_window.append(input_dat)
+        
+        output = self._current_sum/self.windows_length
+        
+        return output
+
 
 
 # -------------------------------------------------
@@ -239,6 +262,55 @@ f.close()
 pretty_json = json.dumps(data_sample_config, indent=2)
 print(pretty_json)
 
+# def filter_moving_average(dat_arr):
+#     len_dat = len(dat_arr)
+#     for
+
+is_radar_running = False
+windows_length = 200
+global distance_data_all_antennas_length
+distance_data_all_antennas_length = 0
+num_rx_antennas = 3
+windows = np.zeros([num_rx_antennas,windows_length])
+
+def radar_running(device,algo,filternya,num_rx_antennas):
+    print("Begin Radar Running")
+
+    while(is_radar_running):
+        frame_contents = device.get_next_frame()
+        frame_data = frame_contents[0]
+
+        for i_ant in range(0, num_rx_antennas):  # for each antenna
+            antenna_samples = frame_data[i_ant, :, :]
+            distance_peak_m, distance_data = algo.compute_distance(antenna_samples)
+
+            # Step 4 - peak search and distance calculation
+            skip = 8
+            distance_peak = np.argmax(distance_data[skip:])
+            magnitude = distance_data[distance_peak + skip]
+
+            distance_data_all_antennas[i_ant] = distance_data
+
+            # Without Filter
+            # windows = windows[1:]
+            # windows = np.append(windows,[magnitude])
+            # windows_all.append(windows)
+
+            # With Filter
+            # windows = windows[1:]
+            # datanya = filternya.filter_dat(magnitude)
+            # windows = np.append(windows,[datanya])
+            # windows_all.append(windows)
+            windows[i_ant] = np.roll(windows[i_ant],-1)
+            datanya = filternya.filter_dat(magnitude)
+            windows[i_ant][-1] = datanya
+        
+            # print("Distance antenna # " + str(i_ant) + ": " + format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
+    print("Ending Radar Running")
+
+def breath_signal_running():
+    
+    return "jancok"
 
 
 # -------------------------------------------------
@@ -256,7 +328,7 @@ if __name__ == '__main__':
 
         # use all available RX antennas
         # num_rx_antennas = device.get_sensor_information()["num_rx_antennas"]
-        num_rx_antennas = 3
+        
 
         metrics = FmcwMetrics(
             range_resolution_m=0.05,
@@ -305,42 +377,71 @@ if __name__ == '__main__':
         # chirp.hp_cutoff_Hz = 80000
 
         device.set_acquisition_sequence(sequence)
-
+        
+        distance_data_all_antennas_length = chirp.num_samples
+        distance_data_all_antennas = np.zeros([num_rx_antennas,distance_data_all_antennas_length])
+        
         algo = DistanceAlgo(chirp, chirp_loop.loop.num_repetitions)
         draw = Draw(metrics.max_range_m, num_rx_antennas, chirp.num_samples)
         vitaldraw = VitalDraw(num_rx_antennas, windows_length)
 
+        filternya = Filter_moving_avg(5)
+        is_radar_running = True
+        radar_thread = threading.Thread(target=radar_running,args=(device,algo,filternya,num_rx_antennas))
+        radar_thread.start()
+        # time.sleep(2)
+
         # for frame_number in range(args.nframes):  # for each frame
         while draw.is_open():
-            if not draw.is_open():
+            if not draw.is_open():                
+                # radar_thread.
                 break
-            frame_contents = device.get_next_frame()
-            frame_data = frame_contents[0]
 
-            distance_data_all_antennas = []
-            distance_peak_m_4_all_ant = []
-            windows_all = []
+            # Without Thread
+            # frame_contents = device.get_next_frame()
+            # frame_data = frame_contents[0]
 
-            for i_ant in range(0, num_rx_antennas):  # for each antenna
-                antenna_samples = frame_data[i_ant, :, :]
-                distance_peak_m, distance_data = algo.compute_distance(antenna_samples)
+            # distance_data_all_antennas = []
+            # distance_peak_m_4_all_ant = []
+            
 
-                # Step 4 - peak search and distance calculation
-                skip = 8
-                distance_peak = np.argmax(distance_data[skip:])
-                magnitude = distance_data[distance_peak + skip]
-                windows = windows[1:]
-                windows = np.append(windows,[magnitude])
-                windows_all.append(windows)
+            # for i_ant in range(0, num_rx_antennas):  # for each antenna
+            #     antenna_samples = frame_data[i_ant, :, :]
+            #     distance_peak_m, distance_data = algo.compute_distance(antenna_samples)
 
+            #     # Step 4 - peak search and distance calculation
+            #     skip = 8
+            #     distance_peak = np.argmax(distance_data[skip:])
+            #     magnitude = distance_data[distance_peak + skip]
 
-                # distance_data_all_antennas.append(distance_data)
-                # distance_peak_m_4_all_ant.append(distance_peak_m)
+            #     # Without Filter
+            #     # windows = windows[1:]
+            #     # windows = np.append(windows,[magnitude])
+            #     # windows_all.append(windows)
+
+            #     # With Filter
+            #     # windows = windows[1:]
+            #     # datanya = filternya.filter_dat(magnitude)
+            #     # windows = np.append(windows,[datanya])
+            #     # windows_all.append(windows)
+            #     windows[i_ant] = np.roll(windows[i_ant],-1)
+            #     datanya = filternya.filter_dat(magnitude)
+            #     windows[i_ant][-1] = datanya
                 
-                print("Distance antenna # " + str(i_ant) + ": " +
-                      format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
+            #     # windows_all.append(windows[i_ant])
+
+            #     # distance_data_all_antennas.append(distance_data)
+            #     # distance_peak_m_4_all_ant.append(distance_peak_m)
+                
+            #     print("Distance antenna # " + str(i_ant) + ": " +
+            #           format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
+            
             # draw.draw(distance_data_all_antennas)
-            vitaldraw.draw(windows_all)
+            # vitaldraw.draw(windows_all)
+
+            draw.draw(distance_data_all_antennas)
+            vitaldraw.draw(windows)
 
         draw.close()
         vitaldraw.close()
+        is_radar_running = False
