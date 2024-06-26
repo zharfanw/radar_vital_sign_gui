@@ -34,9 +34,16 @@ from ifxradarsdk import get_version_full
 from ifxradarsdk.fmcw import DeviceFmcw
 from ifxradarsdk.fmcw.types import FmcwSimpleSequenceConfig, FmcwMetrics
 from helpers.DistanceAlgo import *
+from iir_heart import iir_heart
+from IIR_Breath import iir_breath
+from PeakHeart import peakheart
+from PeakBreath import peakbreath
 
 import threading
 import time
+import datetime
+
+from scipy.signal import butter, sosfilt
 
 # -------------------------------------------------
 # Presentation
@@ -174,10 +181,13 @@ class VitalDraw:
 
     def _draw_next_time(self, data_all_antennas):
         # data_all_antennas: array of raw data for each antenna
+        minmin = min([np.min(data) for data in data_all_antennas])
+        maxmax = max([np.max(data) for data in data_all_antennas])
 
         for i_ant in range(0, self._num_ant):
             data = data_all_antennas[i_ant]
             self._pln[i_ant].set_ydata(data)
+            # self._axs[i_ant].set_ylim(0,maxmax)
 
     def draw(self, data_all_antennas):
         # Draw plots for all antennas
@@ -200,6 +210,108 @@ class VitalDraw:
 
     def is_open(self):
         return self._is_window_open
+
+class VitalSignDraw:
+    # Draws plots for data - each antenna is in separated plot
+
+    def __init__(self, num_samples, name,fs):
+        # max_range_m:  maximum supported range
+
+        self._pln = []
+
+        plt.ion()
+        self._name = name
+
+        self._fig, self._axs = plt.subplots(nrows=2, ncols=1, figsize=((1 + 1) // 2, 2))
+        self._fig.canvas.manager.set_window_title(self._name)
+        self._fig.set_size_inches(17 / 3, 4)
+
+        self._dist_points = np.arange(0,num_samples,1)
+
+        dum_points = round(num_samples/2)
+        dum_single_point = fs/(2*dum_points)
+        self._dist_points_fft = np.arange(0,(fs/2),dum_single_point)
+
+        self._fig.canvas.mpl_connect('close_event', self.close)
+        self._is_window_open = True
+        self._is_first = True
+
+    def _draw_first_time(self, heart_data,dat_fft):
+        # Create common plots as well scale it in same way
+        # data_all_antennas: array of raw data for each antenna
+        # minmin = min(heart_data)
+        # maxmax = max(heart_data)
+        minmin = -0.002
+        maxmax = 0.002
+
+        ax = self._axs[0]
+        ax_fft = self._axs[1]
+
+        data = heart_data
+        pln, = ax.plot(self._dist_points, data)
+        ax.set_ylim(minmin, maxmax)
+        self._pln = pln
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Selected magnitude")
+        ax.set_title(self._name + " Rate")
+
+        # data_fft = dat_fft
+        minmin = min(dat_fft)
+        maxmax = max(dat_fft)
+        pln_fft, = ax_fft.plot(self._dist_points_fft,dat_fft)
+        ax_fft.set_ylim(minmin, maxmax)
+        self._pln_fft = pln_fft
+        ax_fft.set_xlabel("Freq")
+        ax_fft.set_ylabel("Magnitude")
+        ax_fft.set_title(self._name + " Rate Spectrum")
+
+
+        self._fig.tight_layout()
+
+
+
+    def _draw_next_time(self, heart_data,dat_fft,str_bpm):
+        # data_all_antennas: array of raw data for each antenna
+        minmin = min(heart_data)
+        maxmax = max(heart_data)
+        ax = self._axs[0]
+        
+        data = heart_data
+        self._pln.set_ydata(data)
+        ax.set_ylim(minmin,maxmax)
+
+        minmin = min(dat_fft)
+        maxmax = max(dat_fft)
+        ax_fft = self._axs[1]
+        self._pln_fft.set_ydata(dat_fft)
+        ax_fft.set_ylim(minmin,maxmax)
+        ax_fft.set_title(self._name + " Rate Spectrum|BPM : "+str_bpm)
+
+
+
+    def draw(self, datanya,fftnya,str_bpm):
+        # Draw plots for all antennas
+        # data_all_antennas: array of raw data for each antenna
+        if self._is_window_open:
+            if self._is_first:  # handle the first run
+                self._draw_first_time(datanya,fftnya)
+                self._is_first = False
+            else:
+                self._draw_next_time(datanya,fftnya,str_bpm)
+
+            self._fig.canvas.draw_idle()
+            self._fig.canvas.flush_events()
+
+    def close(self, event=None):
+        if self.is_open():
+            self._is_window_open = False
+            plt.close(self._fig)
+            plt.close('all')  # Needed for Matplotlib ver: 3.4.0 and 3.4.1
+            print('Application closed!')
+
+    def is_open(self):
+        return self._is_window_open
+
 
 class Filter_moving_avg:
     def __init__(self,windows_length):
@@ -272,11 +384,19 @@ global distance_data_all_antennas_length
 distance_data_all_antennas_length = 0
 num_rx_antennas = 3
 windows = np.zeros([num_rx_antennas,windows_length])
+filtered_ma_windows = np.zeros([num_rx_antennas,windows_length])
+filtered_10_ma_windows = np.zeros([num_rx_antennas,windows_length])
+heart_signal =np.zeros(windows_length)
+global breath_signal
+breath_signal =np.zeros(windows_length)
+
+current_time = datetime.datetime.now()
 
 def radar_running(device,algo,filternya,num_rx_antennas):
     print("Begin Radar Running")
 
     while(is_radar_running):
+        current_time = datetime.datetime.now()
         frame_contents = device.get_next_frame()
         frame_data = frame_contents[0]
 
@@ -302,15 +422,106 @@ def radar_running(device,algo,filternya,num_rx_antennas):
             # windows = np.append(windows,[datanya])
             # windows_all.append(windows)
             windows[i_ant] = np.roll(windows[i_ant],-1)
+            filtered_ma_windows[i_ant] = np.roll(filtered_ma_windows[i_ant],-1)
             datanya = filternya.filter_dat(magnitude)
-            windows[i_ant][-1] = datanya
+
+            # windows[i_ant][-1] = datanya
+            filtered_ma_windows[i_ant][-1] = datanya
+            windows[i_ant][-1] = magnitude
         
             # print("Distance antenna # " + str(i_ant) + ": " + format(distance_peak_m, "^05.3f") + "m Magnitude: "+format(magnitude, "^05.9f"))
+        delta_time = datetime.datetime.now() - current_time
+        # print(delta_time)
+        
+    print("Ending Radar Running")
+
+def heart_signal_running():
+    # HEart Filter
+    fs = 5  # 采样率为20Hz，即0.05秒的采样间隔
+    _heartf1 = 0.8 / (fs/2)  # 归一化通带截止频率
+    _heartf2 = 2 / (fs/2)  # 归一化阻带截止频率
+    _breathf1 = 0.1 / (fs/2)  # 归一化通带截止频率
+    _breathf2 = 0.6 / (fs/2)  # 归一化阻带截止频率
+    sos_heart = butter(2, [_heartf1, _heartf2], btype='bandpass', output='sos')
+    sos_breath = butter(3, [_breathf1, _breathf2], btype='bandpass', output='sos')
+    heartDraw = VitalSignDraw(windows_length,"Heart",fs)
+    while(is_radar_running):
+        breath_wave = iir_breath(4, windows[0],5,sos_breath)
+        heart_wave = iir_heart(8, windows[0],5,sos_heart)
+        # heart_signal = np.transpose(heart_wave)
+        heart_signal = heart_wave
+        breath_signal = breath_wave
+        
+        
+
+        
+        # minmin = min(heart_signal)
+        # maxmax = max(heart_signal)
+        # print(f"Max Heart：{maxmax}, Min Heart：{minmin}")
+        breath_fre = np.abs(np.fft.fftshift(np.fft.fft(breath_wave)))
+        heart_fre = np.abs(np.fft.fftshift(np.fft.fft(heart_wave)))
+        heart_fre = np.split(heart_fre,2)
+        heart_fre = heart_fre[1]
+        # print("Size Hearth LEngth")
+        # print(heart_wave.size)
+        # breath_rate, maxIndexBreathSpect = peakbreath(breath_fre)
+        # heart_rate = peakheart(heart_fre, maxIndexBreathSpect)
+        dum_points = round(len(heart_fre)/2)
+        dum_single_point = fs/(2*dum_points)
+        hz2bpm = 60
+        hz_val = heart_fre.argmax() *dum_single_point
+        bpm_val = hz_val*hz2bpm
+        if(hz_val >0.8):
+            str_bpm = str(bpm_val) + "bpm"
+        else:
+            bpm_val = 0.2*hz2bpm
+            str_bpm = "<"+str(bpm_val) + "bpm"
+        # print(f"Breath Rate：{breath_rate}, Heart Rate：{heart_rate}")
+        heartDraw.draw(heart_wave,heart_fre, str_bpm)
+    heartDraw.close()
     print("Ending Radar Running")
 
 def breath_signal_running():
-    
-    return "jancok"
+    # HEart Filter
+    fs = 5  # 采样率为20Hz，即0.05秒的采样间隔
+    _breathf1 = 0.01 / (fs/2)  # 归一化通带截止频率
+    _breathf2 = 0.6 / (fs/2)  # 归一化阻带截止频率
+    sos_breath = butter(8, [_breathf1, _breathf2], btype='bandpass', output='sos')
+    Breathdraw = VitalSignDraw(windows_length,"Breath",fs)
+    while(is_radar_running):
+        # breath_wave = iir_breath(4, filtered_ma_windows[0],5,sos_breath)
+        breath_wave = filtered_ma_windows[0]
+        
+
+        
+        # minmin = min(heart_signal)
+        # maxmax = max(heart_signal)
+        # print(f"Max Heart：{maxmax}, Min Heart：{minmin}")
+        breath_fre = np.abs(np.fft.fftshift(np.fft.fft(breath_wave)))
+        breath_fre = np.split(breath_fre,2)
+        breath_fre = breath_fre[1]
+        breath_fre[0]=0
+        breath_fre[1]=0
+        # print("Size Hearth LEngth")
+        # print(heart_wave.size)
+        # breath_rate, maxIndexBreathSpect = peakbreath(breath_fre)
+        # heart_rate = peakheart(heart_fre, maxIndexBreathSpect)
+        dum_points = round(len(breath_fre)/2)
+        dum_single_point = fs/(2*dum_points)
+        hz2bpm = 60
+        hz_val = breath_fre.argmax() *dum_single_point
+        bpm_val = hz_val*hz2bpm
+        if(hz_val >0.2):
+            str_bpm = str(bpm_val) + "bpm"
+        else:
+            bpm_val = 0.2*hz2bpm
+            str_bpm = "<"+str(bpm_val) + "bpm"
+        # locate_max =
+        # print(f"Breath Rate：{locate_max}")
+        Breathdraw.draw(breath_wave,breath_fre,str_bpm)
+    Breathdraw.close()
+    print("Ending Breath Signal Running")
+
 
 
 # -------------------------------------------------
@@ -382,18 +593,27 @@ if __name__ == '__main__':
         distance_data_all_antennas = np.zeros([num_rx_antennas,distance_data_all_antennas_length])
         
         algo = DistanceAlgo(chirp, chirp_loop.loop.num_repetitions)
-        draw = Draw(metrics.max_range_m, num_rx_antennas, chirp.num_samples)
+        # draw = Draw(metrics.max_range_m, num_rx_antennas, chirp.num_samples)
         vitaldraw = VitalDraw(num_rx_antennas, windows_length)
 
-        filternya = Filter_moving_avg(5)
+        filternya = Filter_moving_avg(10)
+        filternya_10 = Filter_moving_avg(10)
         is_radar_running = True
         radar_thread = threading.Thread(target=radar_running,args=(device,algo,filternya,num_rx_antennas))
         radar_thread.start()
-        # time.sleep(2)
+        time.sleep(2)
+        
+        vital_thread = threading.Thread(target=heart_signal_running)
+        vital_thread.start()
+        time.sleep(2)
+
+        breath_thread = threading.Thread(target=breath_signal_running)
+        breath_thread.start()
+        time.sleep(2)
 
         # for frame_number in range(args.nframes):  # for each frame
-        while draw.is_open():
-            if not draw.is_open():                
+        while vitaldraw.is_open():
+            if not vitaldraw.is_open():                
                 # radar_thread.
                 break
 
@@ -439,9 +659,15 @@ if __name__ == '__main__':
             # draw.draw(distance_data_all_antennas)
             # vitaldraw.draw(windows_all)
 
-            draw.draw(distance_data_all_antennas)
+            # draw.draw(distance_data_all_antennas)
             vitaldraw.draw(windows)
+            # for index in range(0,len(breath_signal)):
+            #     print(breath_signal[index])
+            
+            
 
-        draw.close()
+        # draw.close()
         vitaldraw.close()
+        # radar_thread.
+        # VitalSignDraw.close()
         is_radar_running = False
